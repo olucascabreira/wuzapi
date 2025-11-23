@@ -1321,6 +1321,14 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 			//if evt.Type == events.ReceiptTypeRead {
 			if evt.Type == types.ReceiptTypeRead {
 				postmap["state"] = "Read"
+				// Update receipt cache for polling
+				for _, msgID := range evt.MessageIDs {
+					GetChatPanelCache().AddReceipt(mycli.userID, MessageStatusUpdate{
+						MessageID: msgID,
+						Status:    "read",
+						Timestamp: time.Now().Unix(),
+					})
+				}
 			} else {
 				postmap["state"] = "ReadSelf"
 			}
@@ -1328,6 +1336,14 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 		} else if evt.Type == types.ReceiptTypeDelivered {
 			postmap["state"] = "Delivered"
 			log.Info().Str("id", evt.MessageIDs[0]).Str("source", evt.SourceString()).Str("timestamp", fmt.Sprintf("%v", evt.Timestamp)).Msg("Message delivered")
+			// Update receipt cache for polling
+			for _, msgID := range evt.MessageIDs {
+				GetChatPanelCache().AddReceipt(mycli.userID, MessageStatusUpdate{
+					MessageID: msgID,
+					Status:    "delivered",
+					Timestamp: time.Now().Unix(),
+				})
+			}
 		} else {
 			// Discard webhooks for inactive or other delivery types
 			return
@@ -1342,9 +1358,13 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 			} else {
 				log.Info().Str("from", evt.From.String()).Str("lastSeen", fmt.Sprintf("%v", evt.LastSeen)).Msg("User is now offline")
 			}
+			// Update presence cache
+			GetChatPanelCache().SetPresence(mycli.userID, evt.From.String(), false, evt.LastSeen)
 		} else {
 			postmap["state"] = "online"
 			log.Info().Str("from", evt.From.String()).Msg("User is now online")
+			// Update presence cache
+			GetChatPanelCache().SetPresence(mycli.userID, evt.From.String(), true, time.Time{})
 		}
 	case *events.HistorySync:
 		postmap["type"] = "HistorySync"
@@ -1373,6 +1393,13 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 		postmap["type"] = "ChatPresence"
 		dowebhook = 1
 		log.Info().Str("state", fmt.Sprintf("%s", evt.State)).Str("media", fmt.Sprintf("%s", evt.Media)).Str("chat", evt.MessageSource.Chat.String()).Str("sender", evt.MessageSource.Sender.String()).Msg("Chat Presence received")
+		// Update typing cache
+		isTyping := evt.State == types.ChatPresenceComposing || evt.State == types.ChatPresenceRecording
+		mediaType := ""
+		if evt.Media == types.ChatPresenceMediaAudio {
+			mediaType = "audio"
+		}
+		GetChatPanelCache().SetTyping(mycli.userID, evt.MessageSource.Chat.String(), evt.MessageSource.Sender.String(), mediaType, isTyping)
 	case *events.CallOffer:
 		postmap["type"] = "CallOffer"
 		dowebhook = 1

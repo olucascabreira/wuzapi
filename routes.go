@@ -122,6 +122,15 @@ func (s *server) routes() {
 	s.router.Handle("/chat/request-unavailable-message", c.Then(s.RequestUnavailableMessage())).Methods("POST")
 	s.router.Handle("/chat/archive", c.Then(s.ArchiveChat())).Methods("POST")
 
+	// Chat Panel Management Routes
+	s.router.Handle("/chat/conversations", c.Then(s.GetConversationsHandler())).Methods("GET")
+	s.router.Handle("/chat/conversations/{jid}", c.Then(s.GetConversationHandler())).Methods("GET")
+	s.router.Handle("/chat/conversations/{jid}", c.Then(s.UpdateConversationHandler())).Methods("PATCH")
+	s.router.Handle("/chat/conversations/{jid}/unread", c.Then(s.ResetUnreadHandler())).Methods("POST")
+	s.router.Handle("/chat/messages/search", c.Then(s.SearchMessagesHandler())).Methods("GET")
+	s.router.Handle("/chat/messages/{msgid}/status", c.Then(s.GetMessageStatusHandler())).Methods("GET")
+	s.router.Handle("/chat/poll", c.Then(s.PollEventsHandler())).Methods("GET")
+
 	s.router.Handle("/status/set/text", c.Then(s.SetStatusMessage())).Methods("POST")
 
 	s.router.Handle("/call/reject", c.Then(s.RejectCall())).Methods("POST")
@@ -158,5 +167,29 @@ func (s *server) routes() {
 
 	s.router.Handle("/newsletter/list", c.Then(s.ListNewsletter())).Methods("GET")
 
+	// Chat Panel SPA - serve React app
+	chatPanelPath := exPath + "/static/chat/dist"
+	s.router.PathPrefix("/chat/").Handler(http.StripPrefix("/chat/", spaHandler(chatPanelPath)))
+
 	s.router.PathPrefix("/").Handler(http.FileServer(http.Dir(exPath + "/static/")))
+}
+
+// spaHandler serves a Single Page Application, returning index.html for non-file routes
+func spaHandler(staticPath string) http.Handler {
+	fs := http.FileServer(http.Dir(staticPath))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Get the file path
+		path := filepath.Join(staticPath, r.URL.Path)
+
+		// Check if the file exists
+		_, err := os.Stat(path)
+		if os.IsNotExist(err) {
+			// File doesn't exist, serve index.html for SPA routing
+			http.ServeFile(w, r, filepath.Join(staticPath, "index.html"))
+			return
+		}
+
+		// File exists, serve it
+		fs.ServeHTTP(w, r)
+	})
 }

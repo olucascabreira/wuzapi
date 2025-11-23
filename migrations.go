@@ -70,6 +70,21 @@ var migrations = []Migration{
 		Name:  "add_data_json",
 		UpSQL: addDataJsonSQL,
 	},
+	{
+		ID:    9,
+		Name:  "add_conversations_table",
+		UpSQL: addConversationsTableSQL,
+	},
+	{
+		ID:    10,
+		Name:  "add_message_status_table",
+		UpSQL: addMessageStatusTableSQL,
+	},
+	{
+		ID:    11,
+		Name:  "add_message_history_columns",
+		UpSQL: addMessageHistoryColumnsSQL,
+	},
 }
 
 const changeIDToStringSQL = `
@@ -435,6 +450,96 @@ func applyMigration(db *sqlx.DB, migration Migration) error {
 		} else {
 			_, err = tx.Exec(migration.UpSQL)
 		}
+	} else if migration.ID == 9 {
+		if db.DriverName() == "sqlite" {
+			// Create conversations table for SQLite
+			err = createTableIfNotExistsSQLite(tx, "conversations", `
+				CREATE TABLE conversations (
+					id INTEGER PRIMARY KEY AUTOINCREMENT,
+					user_id TEXT NOT NULL,
+					chat_jid TEXT NOT NULL,
+					name TEXT,
+					avatar_url TEXT,
+					is_group BOOLEAN DEFAULT 0,
+					last_message_id TEXT,
+					last_message_preview TEXT,
+					last_message_at DATETIME,
+					unread_count INTEGER DEFAULT 0,
+					is_muted BOOLEAN DEFAULT 0,
+					is_archived BOOLEAN DEFAULT 0,
+					is_pinned BOOLEAN DEFAULT 0,
+					created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+					updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+					UNIQUE(user_id, chat_jid)
+				)`)
+			if err == nil {
+				_, err = tx.Exec(`CREATE INDEX IF NOT EXISTS idx_conversations_user_id ON conversations (user_id)`)
+			}
+			if err == nil {
+				_, err = tx.Exec(`CREATE INDEX IF NOT EXISTS idx_conversations_last_message_at ON conversations (user_id, last_message_at DESC)`)
+			}
+			if err == nil {
+				_, err = tx.Exec(`CREATE INDEX IF NOT EXISTS idx_conversations_unread ON conversations (user_id, unread_count)`)
+			}
+		} else {
+			_, err = tx.Exec(migration.UpSQL)
+		}
+	} else if migration.ID == 10 {
+		if db.DriverName() == "sqlite" {
+			// Create message_status table for SQLite
+			err = createTableIfNotExistsSQLite(tx, "message_status", `
+				CREATE TABLE message_status (
+					id INTEGER PRIMARY KEY AUTOINCREMENT,
+					message_id TEXT NOT NULL,
+					user_id TEXT NOT NULL,
+					status TEXT NOT NULL,
+					participant_jid TEXT,
+					updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+					UNIQUE(message_id, user_id, COALESCE(participant_jid, ''))
+				)`)
+			if err == nil {
+				_, err = tx.Exec(`CREATE INDEX IF NOT EXISTS idx_message_status_message_id ON message_status (message_id)`)
+			}
+			if err == nil {
+				_, err = tx.Exec(`CREATE INDEX IF NOT EXISTS idx_message_status_user_id ON message_status (user_id)`)
+			}
+		} else {
+			_, err = tx.Exec(migration.UpSQL)
+		}
+	} else if migration.ID == 11 {
+		if db.DriverName() == "sqlite" {
+			// Add new columns to message_history for SQLite
+			err = addColumnIfNotExistsSQLite(tx, "message_history", "is_from_me", "BOOLEAN DEFAULT 0")
+			if err == nil {
+				err = addColumnIfNotExistsSQLite(tx, "message_history", "is_forwarded", "BOOLEAN DEFAULT 0")
+			}
+			if err == nil {
+				err = addColumnIfNotExistsSQLite(tx, "message_history", "is_edited", "BOOLEAN DEFAULT 0")
+			}
+			if err == nil {
+				err = addColumnIfNotExistsSQLite(tx, "message_history", "is_deleted", "BOOLEAN DEFAULT 0")
+			}
+			if err == nil {
+				err = addColumnIfNotExistsSQLite(tx, "message_history", "reactions", "TEXT")
+			}
+			if err == nil {
+				err = addColumnIfNotExistsSQLite(tx, "message_history", "media_mime_type", "TEXT")
+			}
+			if err == nil {
+				err = addColumnIfNotExistsSQLite(tx, "message_history", "media_size", "INTEGER")
+			}
+			if err == nil {
+				err = addColumnIfNotExistsSQLite(tx, "message_history", "media_thumbnail", "TEXT")
+			}
+			if err == nil {
+				err = addColumnIfNotExistsSQLite(tx, "message_history", "push_name", "TEXT")
+			}
+			if err == nil {
+				err = addColumnIfNotExistsSQLite(tx, "message_history", "status", "TEXT DEFAULT 'sent'")
+			}
+		} else {
+			_, err = tx.Exec(migration.UpSQL)
+		}
 	} else {
 		_, err = tx.Exec(migration.UpSQL)
 	}
@@ -645,4 +750,100 @@ BEGIN
 END $$;
 
 -- SQLite version (handled in code)
+`
+
+const addConversationsTableSQL = `
+-- PostgreSQL version - Create conversations table for chat management
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'conversations') THEN
+        CREATE TABLE conversations (
+            id SERIAL PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            chat_jid TEXT NOT NULL,
+            name TEXT,
+            avatar_url TEXT,
+            is_group BOOLEAN DEFAULT FALSE,
+            last_message_id TEXT,
+            last_message_preview TEXT,
+            last_message_at TIMESTAMP,
+            unread_count INTEGER DEFAULT 0,
+            is_muted BOOLEAN DEFAULT FALSE,
+            is_archived BOOLEAN DEFAULT FALSE,
+            is_pinned BOOLEAN DEFAULT FALSE,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(user_id, chat_jid)
+        );
+        CREATE INDEX idx_conversations_user_id ON conversations (user_id);
+        CREATE INDEX idx_conversations_last_message_at ON conversations (user_id, last_message_at DESC);
+        CREATE INDEX idx_conversations_unread ON conversations (user_id, unread_count);
+    END IF;
+END $$;
+`
+
+const addMessageStatusTableSQL = `
+-- PostgreSQL version - Create message_status table for tracking delivery/read status
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'message_status') THEN
+        CREATE TABLE message_status (
+            id SERIAL PRIMARY KEY,
+            message_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            status TEXT NOT NULL,
+            participant_jid TEXT,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(message_id, user_id, COALESCE(participant_jid, ''))
+        );
+        CREATE INDEX idx_message_status_message_id ON message_status (message_id);
+        CREATE INDEX idx_message_status_user_id ON message_status (user_id);
+    END IF;
+END $$;
+`
+
+const addMessageHistoryColumnsSQL = `
+-- PostgreSQL version - Add new columns to message_history for enhanced chat features
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'message_history' AND column_name = 'is_from_me') THEN
+        ALTER TABLE message_history ADD COLUMN is_from_me BOOLEAN DEFAULT FALSE;
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'message_history' AND column_name = 'is_forwarded') THEN
+        ALTER TABLE message_history ADD COLUMN is_forwarded BOOLEAN DEFAULT FALSE;
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'message_history' AND column_name = 'is_edited') THEN
+        ALTER TABLE message_history ADD COLUMN is_edited BOOLEAN DEFAULT FALSE;
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'message_history' AND column_name = 'is_deleted') THEN
+        ALTER TABLE message_history ADD COLUMN is_deleted BOOLEAN DEFAULT FALSE;
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'message_history' AND column_name = 'reactions') THEN
+        ALTER TABLE message_history ADD COLUMN reactions TEXT;
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'message_history' AND column_name = 'media_mime_type') THEN
+        ALTER TABLE message_history ADD COLUMN media_mime_type TEXT;
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'message_history' AND column_name = 'media_size') THEN
+        ALTER TABLE message_history ADD COLUMN media_size BIGINT;
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'message_history' AND column_name = 'media_thumbnail') THEN
+        ALTER TABLE message_history ADD COLUMN media_thumbnail TEXT;
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'message_history' AND column_name = 'push_name') THEN
+        ALTER TABLE message_history ADD COLUMN push_name TEXT;
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'message_history' AND column_name = 'status') THEN
+        ALTER TABLE message_history ADD COLUMN status TEXT DEFAULT 'sent';
+    END IF;
+END $$;
 `
