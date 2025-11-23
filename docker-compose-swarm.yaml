@@ -2,7 +2,7 @@ version: "3.7"
 
 services:
   wuzapi-server:
-    image: asternic/wuzapi:latest
+    image: ${WUZAPI_IMAGE:-your-registry/wuzapi:latest}
     networks:
       - network_public
     environment:
@@ -11,14 +11,16 @@ services:
       - DB_PASSWORD=${DB_PASSWORD:-wuzapi}
       - DB_NAME=${DB_NAME:-wuzapi}
       - DB_HOST=db
-
       - DB_PORT=${DB_PORT:-5432}
       - TZ=${TZ:-America/Sao_Paulo}
       - WEBHOOK_FORMAT=${WEBHOOK_FORMAT:-json}
       - SESSION_DEVICE_NAME=${SESSION_DEVICE_NAME:-WuzAPI}
-      # RabbitMQ configuration Optional
+      # RabbitMQ configuration (Optional)
       - RABBITMQ_URL=amqp://wuzapi:wuzapi@rabbitmq:5672/
       - RABBITMQ_QUEUE=whatsapp_events
+    volumes:
+      - wuzapi_data:/app/dbdata
+      - wuzapi_files:/app/files
     deploy:
       mode: replicated
       replicas: 1
@@ -32,20 +34,42 @@ services:
           memory: 512MB
       labels:
         - traefik.enable=true
-        - traefik.http.routers.wuzapi-server.rule=Host(`api.wuzapi.app`)
+        - traefik.http.routers.wuzapi-server.rule=Host(`${WUZAPI_DOMAIN:-api.wuzapi.app}`)
         - traefik.http.routers.wuzapi-server.entrypoints=websecure
         - traefik.http.routers.wuzapi-server.priority=1
         - traefik.http.routers.wuzapi-server.tls.certresolver=letsencryptresolver
         - traefik.http.routers.wuzapi-server.service=wuzapi-server
         - traefik.http.services.wuzapi-server.loadbalancer.server.port=${WUZAPI_PORT:-8080}
-    # healthcheck:
-    #   test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-    #   interval: 10s
-    #   timeout: 5s
-    #   retries: 3
-    #   start_period: 10s
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
-  # RabbitMQ service OPTIONAL
+  db:
+    image: postgres:15-alpine
+    networks:
+      - network_public
+    environment:
+      - POSTGRES_USER=${DB_USER:-wuzapi}
+      - POSTGRES_PASSWORD=${DB_PASSWORD:-wuzapi}
+      - POSTGRES_DB=${DB_NAME:-wuzapi}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    deploy:
+      mode: replicated
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      placement:
+        constraints: [node.role == manager]
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256MB
+
+  # RabbitMQ service (OPTIONAL - remove if not needed)
   rabbitmq:
     image: rabbitmq:3-management
     hostname: rabbitmq
@@ -68,7 +92,7 @@ services:
           memory: 256MB
       labels:
         - traefik.enable=true
-        - traefik.http.routers.rabbitmq-management.rule=Host(`rabbitmq.wuzapi.app`)
+        - traefik.http.routers.rabbitmq-management.rule=Host(`rabbitmq.${WUZAPI_DOMAIN:-wuzapi.app}`)
         - traefik.http.routers.rabbitmq-management.entrypoints=websecure
         - traefik.http.routers.rabbitmq-management.priority=1
         - traefik.http.routers.rabbitmq-management.tls.certresolver=letsencryptresolver
@@ -78,6 +102,9 @@ services:
       - rabbitmq_data:/var/lib/rabbitmq
 
 volumes:
+  wuzapi_data:
+  wuzapi_files:
+  postgres_data:
   rabbitmq_data:
 
 networks:

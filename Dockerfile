@@ -1,3 +1,13 @@
+# Stage 1: Build React frontend
+FROM node:20-alpine AS frontend-builder
+
+WORKDIR /app/static/chat
+COPY static/chat/package*.json ./
+RUN npm ci
+COPY static/chat/ ./
+RUN npm run build
+
+# Stage 2: Build Go backend
 FROM golang:1.24-bullseye AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -21,6 +31,7 @@ COPY . .
 ENV CGO_ENABLED=1
 RUN go build -o wuzapi
 
+# Stage 3: Final image
 FROM debian:bullseye-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -45,6 +56,9 @@ WORKDIR /app
 COPY --from=builder /app/wuzapi         /app/
 COPY --from=builder /app/static         /app/static/
 COPY --from=builder /app/wuzapi.service /app/wuzapi.service
+
+# Copy React build output
+COPY --from=frontend-builder /app/static/chat/dist /app/static/chat/dist/
 
 RUN chmod +x /app/wuzapi && \
     chmod -R 755 /app && \
