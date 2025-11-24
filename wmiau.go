@@ -1394,10 +1394,11 @@ func (mycli *MyClient) myEventHandler(rawEvt interface{}) {
 		dowebhook = 1
 		log.Info().Str("state", fmt.Sprintf("%s", evt.State)).Str("media", fmt.Sprintf("%s", evt.Media)).Str("chat", evt.MessageSource.Chat.String()).Str("sender", evt.MessageSource.Sender.String()).Msg("Chat Presence received")
 		// Update typing cache
-		isTyping := evt.State == types.ChatPresenceComposing || evt.State == types.ChatPresenceRecording
+		isTyping := evt.State == types.ChatPresenceComposing
 		mediaType := ""
 		if evt.Media == types.ChatPresenceMediaAudio {
 			mediaType = "audio"
+			isTyping = true // Recording audio is also a form of typing
 		}
 		GetChatPanelCache().SetTyping(mycli.userID, evt.MessageSource.Chat.String(), evt.MessageSource.Sender.String(), mediaType, isTyping)
 	case *events.CallOffer:
